@@ -41,14 +41,14 @@ MainWindow::MainWindow(QWidget *parent)
     localFileList->setRootIsDecorated(false);
     localFileList->setHeaderLabels(QStringList()<<tr("Name")<<tr("Size")<<tr("Owner")<<tr("Group")<<tr("Time"));
     //    localFileList->header()->setStretchLastSection(false);
-    localFileList->header()->setSectionResizeMode(QHeaderView::Stretch);
+    localFileList->header()->setSectionResizeMode(QHeaderView::Interactive);
 
     QLabel *remoteFileListLabel=new QLabel(tr("Remote Files"));
     remoteFileList =new QTreeWidget;
     remoteFileList->setRootIsDecorated(false);
     remoteFileList->setHeaderLabels(QStringList()<<tr("Name")<<tr("Size")<<tr("Owner")<<tr("Group")<<tr("Time"));
     //    remoteFileList->header()->setStretchLastSection(false);
-    remoteFileList->header()->setSectionResizeMode(QHeaderView::Stretch);
+    remoteFileList->header()->setSectionResizeMode(QHeaderView::Interactive);
 
     QLabel* taskListLabel = new QLabel(tr("Task List"));
     taskList=new QTreeWidget;
@@ -117,12 +117,12 @@ MainWindow::MainWindow(QWidget *parent)
 
 void MainWindow::changeDataConnMode(DataConnMode mode){
     this->dataConnMode = mode;
-    qDebug()<<"Change mode ";
+    qDebug().noquote()<<"Change mode ";
     if(mode==DataConnMode::PASV){
-        qDebug()<<"PASV"<<endl;
+        qDebug().noquote()<<"PASV"<<endl;
     }
     else{
-        qDebug()<<"PORT"<<endl;
+        qDebug().noquote()<<"PORT"<<endl;
     }
 }
 
@@ -134,6 +134,8 @@ void MainWindow::connectToServer(){
 
     connect(commandSocket,QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),this,&MainWindow::handleCommandError);
     commandSocket->connectToHost(serverAdressInput->text(),serverPortInput->text().toUShort());
+
+    serverStatus=ServerStatus::COMMAND_CONNECT_START;
 }
 
 void MainWindow::handleCommandError(QAbstractSocket::SocketError socketError){
@@ -141,13 +143,13 @@ void MainWindow::handleCommandError(QAbstractSocket::SocketError socketError){
     case QAbstractSocket::RemoteHostClosedError:
         break;
     case QAbstractSocket::HostNotFoundError:
-        qDebug()<<"Host not found"<<endl;
+        qDebug().noquote()<<"Host not found"<<endl;
         break;
     case QAbstractSocket::ConnectionRefusedError:
-        qDebug()<<"Connection refused"<<endl;
+        qDebug().noquote()<<"Connection refused"<<endl;
         break;
     default:
-        qDebug()<<"Some error happend"<<endl;
+        qDebug().noquote()<<"Some error happend"<<endl;
     }
 }
 
@@ -156,55 +158,98 @@ void MainWindow::handleCommandResponse(){
 
     logPanel->appendPlainText(responseBuf);
 
-    qDebug()<<responseBuf<<endl;
+    qDebug().noquote()<<responseBuf<<endl;
 
     QPair<int,QString> parseRes=parseCommandResponse(responseBuf);
     int responseCode=parseRes.first;
     QString responseMessage=parseRes.second;
 
-    qDebug()<<responseCode<<endl;
-
     if(responseCode==220){
-        sendCommandRequest(RequestType::USER,userNameInput->text()+"\r\n");
-    }
-
-    if(responseCode==331){
-        sendCommandRequest(RequestType::PASS,passwordInput->text()+"\r\n");
-    }
-
-    if(responseCode==230){
-        sendCommandRequest(RequestType::SYST,"\r\n");
-    }
-
-    if(responseCode==215){
-        sendCommandRequest(RequestType::TYPE,"I\r\n");
-        dataConnStatus=DataConnStatus::IDLE;
-    }
-
-    if(responseCode == 200){
-        if(dataConnStatus==DataConnStatus::IDLE){
-            initDataConn();
-            if(dataConnMode==DataConnMode::PORT){
-                QString ipAddress;
-                int port=dataServer->serverPort();
-                QList<QHostAddress> ipAddressesList = QNetworkInterface::allAddresses();
-                for (int i = 0; i < ipAddressesList.size(); ++i) {
-                    if (ipAddressesList.at(i) != QHostAddress::LocalHost &&
-                            ipAddressesList.at(i).toIPv4Address()) {
-                        ipAddress = ipAddressesList.at(i).toString();
-                        break;
-                    }
-                }
-                if (ipAddress.isEmpty())
-                    ipAddress = QHostAddress(QHostAddress::LocalHost).toString();
-                sendCommandRequest(RequestType::PORT,QString("%1,%2,%3\r\n").arg(ipAddress).arg(port/256).arg(port%256).replace(".",","));
-                statusLabel->setText(tr("The server is running on IP: %1 port: %2\n")
-                                             .arg(ipAddress).arg(dataServer->serverPort()));
-            }
-            dataConnStatus=DataConnStatus::CONNECT;
+        // command connect success
+        if(serverStatus==ServerStatus::COMMAND_CONNECT_START){
+            changeServerStatus(ServerStatus::COMMAND_CONNECT_END);
+        }
+        if(serverStatus==ServerStatus::PORT_START){
+            changeServerStatus(ServerStatus::PORT_END);
         }
     }
 
+    if(responseCode==331){
+        if(serverStatus==ServerStatus::USER_START){
+            changeServerStatus(ServerStatus::USER_END);
+        }
+    }
+
+    if(responseCode==230){
+        if(serverStatus==ServerStatus::PASS_START){
+            changeServerStatus(ServerStatus::PASS_END);
+        }
+    }
+
+    if(responseCode==215){
+        if(serverStatus==ServerStatus::SYST_START){
+            changeServerStatus(ServerStatus::SYST_END);
+        }
+    }
+
+    if(responseCode == 200){
+        if(serverStatus==ServerStatus::TYPE_START){
+            changeServerStatus(ServerStatus::TYPE_END);
+        }
+        if(serverStatus==ServerStatus::PORT_START){
+            changeServerStatus(ServerStatus::PORT_END);
+        }
+    }
+
+    if(responseCode==226){
+        if(serverStatus==ServerStatus::LIST_START){
+            changeServerStatus(ServerStatus::LIST_END);
+        }
+    }
+
+}
+
+void MainWindow::changeServerStatus(ServerStatus status){
+    if(status==ServerStatus::COMMAND_CONNECT_END){
+        serverStatus=ServerStatus::USER_START;
+        sendCommandRequest(RequestType::USER,userNameInput->text()+"\r\n");
+    }
+    if(status==ServerStatus::USER_END){
+        serverStatus=ServerStatus::PASS_START;
+        sendCommandRequest(RequestType::PASS,passwordInput->text()+"\r\n");
+    }
+    if(status==ServerStatus::PASS_END){
+        serverStatus=ServerStatus::SYST_START;
+        sendCommandRequest(RequestType::SYST,"\r\n");
+    }
+    if(status==ServerStatus::SYST_END){
+        serverStatus=ServerStatus::TYPE_START;
+        sendCommandRequest(RequestType::TYPE,"I\r\n");
+    }
+    if(status==ServerStatus::TYPE_END){
+        if(dataConnStatus==DataConnStatus::DISCONNECT){
+            initDataConn();
+            if(dataConnMode==DataConnMode::PORT){
+                serverStatus=ServerStatus::PORT_START;
+                QString ipAddress;
+                int port=dataServer->serverPort();
+                ipAddress=commandSocket->localAddress().toString();
+                sendCommandRequest(RequestType::PORT,QString("%1,%2,%3\r\n").arg(ipAddress).arg(port/256).arg(port%256).replace(".",","));
+                statusLabel->setText(tr("The server is running on IP: %1 port: %2\n")
+                                             .arg(ipAddress).arg(dataServer->serverPort()));
+                dataConnStatus=DataConnStatus::CONNECT;
+            }
+        }
+    }
+    if(status==ServerStatus::PORT_END){
+        if(remoteDirPath==nullptr){
+            serverStatus=ServerStatus::LIST_START;
+            sendCommandRequest(RequestType::LIST,"\r\n");
+        }
+    }
+    if(status==ServerStatus::LIST_END){
+        status=ServerStatus::IDLE;
+    }
 }
 
 void MainWindow::sendCommandRequest(RequestType requestType, QString requestArgs){
@@ -244,14 +289,56 @@ void MainWindow::initDataConn(){
             close();
             return;
         }
+
         connect(dataServer,&QTcpServer::newConnection,this,&MainWindow::handlePortDataConn);
+        qDebug().noquote()<<"Port server listening"<<endl;
     }
 }
 
 void MainWindow::handlePortDataConn(){
     dataSocket=dataServer->nextPendingConnection();
-    qDebug()<<"New data connection "<<dataSocket<<endl;
+    qDebug().noquote()<<"New data connection "<<dataSocket<<endl;
+    connect(dataSocket,&QTcpSocket::readyRead,this,&MainWindow::handleDataConnResponse);
     connect(dataSocket, &QAbstractSocket::disconnected,dataSocket, &QObject::deleteLater);
+}
+
+void MainWindow::handleDataConnResponse(){
+    if(serverStatus==ServerStatus::LIST_START){
+        QString responseBuf(dataSocket->readAll());
+        qDebug().noquote()<<responseBuf<<endl;
+        QString permission;
+        QString owner;
+        QString group;
+        QString size;
+        QString month;
+        QString day;
+        QString year;
+        QString name;
+        QString time;
+        QString tmp;
+        QTextStream responseBufStream(&responseBuf);
+        while(!responseBufStream.atEnd()){
+            QString lineBuf=responseBufStream.readLine();
+            QTextStream lineBufStream(&lineBuf);
+
+            lineBufStream>>permission>>tmp>>owner>>group>>size>>month>>day>>year>>name;
+
+            time=month+" "+day+" "+year;
+
+            QTreeWidgetItem *item=new QTreeWidgetItem;
+            item->setText(0,name);
+            item->setText(1,size);
+            item->setText(2,owner);
+            item->setText(3,group);
+            item->setText(4,time);
+            isRemoteDirectory[name]=(permission[0]=='d');
+
+            QPixmap pixmap(isRemoteDirectory[name]? ":/images/dir.png":":/images/file.png");
+            item->setIcon(0,pixmap);
+
+            remoteFileList->addTopLevelItem(item);
+        }
+    }
 }
 
 MainWindow::~MainWindow()
@@ -264,10 +351,10 @@ void MainWindow::centerAndResize(){
     QSize availableSize = qApp->primaryScreen()->geometry().size();
     int width = availableSize.width();
     int height = availableSize.height();
-    qDebug() << "Available dimensions " << width << "x" << height;
+    qDebug().noquote() << "Available dimensions " << width << "x" << height;
     width *= 0.8; // 60% of the screen size
     height *= 0.8; // 60% of the screen size
-    qDebug() << "Computed dimensions " << width << "x" << height;
+    qDebug().noquote() << "Computed dimensions " << width << "x" << height;
     QSize newSize( width, height );
 
     setGeometry(
