@@ -21,7 +21,7 @@ MainWindow::MainWindow(QWidget *parent)
     portRadio->setChecked(true);
 
     connect(pasvRadio,&QRadioButton::clicked,[=](){this->changeDataConnMode(DataConnMode::PASV);});
-    connect(pasvRadio,&QRadioButton::clicked,[=](){this->changeDataConnMode(DataConnMode::PORT);});
+    connect(portRadio,&QRadioButton::clicked,[=](){this->changeDataConnMode(DataConnMode::PORT);});
 
 
     QHBoxLayout *groupRadioLayout = new QHBoxLayout;
@@ -264,6 +264,10 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                 this->changeServerStatus(ServerStatus::STOR_START);
             });
 
+            if(serverStatus==ServerStatus::COMMAND_CONNECT_START){
+                uploadAction->setEnabled(false);
+            }
+
             menu.addAction(uploadAction);
             menu.exec(localFileList->mapToGlobal(pos));
         }
@@ -409,6 +413,29 @@ void MainWindow::handleCommandResponse(){
             changeServerStatus(ServerStatus::CWD_END);
         }
     }
+    if(responseCode==227){
+        if(serverStatus==ServerStatus::PASV_START){
+            int leftBracketIndex=responseBuf.indexOf("(");
+            int rightBracketIndex=responseBuf.indexOf(")");
+            responseBuf=responseBuf.mid(leftBracketIndex+1,rightBracketIndex-leftBracketIndex-1);
+            QString ip_1;
+            QString ip_2;
+            QString ip_3;
+            QString ip_4;
+            QString port_1;
+            QString port_2;
+            responseBuf.replace(","," ");
+            QTextStream responseBufStream(&responseBuf);
+            responseBufStream>>ip_1>>ip_2>>ip_3>>ip_4>>port_1>>port_2;
+            QString ip=ip_1+"."+ip_2+"."+ip_3+"."+ip_4;
+            int port=port_1.toInt()*256+port_2.toInt();
+            qDebug().noquote()<<"Connect to: "<<ip<<":"<<port;
+            dataSocket->connectToHost(ip,(unsigned short)port);
+            changeServerStatus(ServerStatus::PASV_END);
+            return;
+        }
+
+    }
 
 }
 
@@ -465,6 +492,20 @@ void MainWindow::changeServerStatus(ServerStatus status){
     if(status==ServerStatus::PORT_END){
         dataConnStatus=DataConnStatus::CONNECT;
         qDebug().noquote()<<"Resume status: "<<stringifyServerStatus(resumeServerStatus)<<endl;
+        changeServerStatus(resumeServerStatus);
+        return;
+    }
+    if(status==ServerStatus::PASV_START){
+        sendCommandRequest(RequestType::PASV,"\r\n");
+        return;
+    }
+    if(status==ServerStatus::PASV_END){
+        dataConnStatus=DataConnStatus::CONNECT;
+        qDebug().noquote()<<"Resume status: "<<stringifyServerStatus(resumeServerStatus)<<endl;
+
+        connect(dataSocket, &QAbstractSocket::disconnected,this,&MainWindow::handleDataConnDisconnect);
+        connect(dataSocket,&QTcpSocket::readyRead,this,&MainWindow::handleDataConnResponse);
+
         changeServerStatus(resumeServerStatus);
         return;
     }
@@ -528,6 +569,12 @@ void MainWindow::changeServerStatus(ServerStatus status){
                 qDebug().noquote()<<"can't open file"<<endl;
             }
             sendCommandRequest(RequestType::STOR,currentFileName+"\r\n");
+            if(dataSocket->state()==QTcpSocket::ConnectingState){
+                connect(dataSocket,&QTcpSocket::connected,this,&MainWindow::handleDataConnRequest);
+            }
+            else{
+                handleDataConnRequest();
+            }
             return;
         }
     }
@@ -535,6 +582,7 @@ void MainWindow::changeServerStatus(ServerStatus status){
         changeServerStatus(ServerStatus::LIST_START);
         return;
     }
+
 }
 
 void MainWindow::addTask(QString taskName, int maximum){
@@ -561,10 +609,11 @@ void MainWindow::sendCommandRequest(RequestType requestType, QString requestArgs
 }
 
 QPair<int,QString> MainWindow::parseCommandResponse(QString responseBuf){
-    QTextStream responseBufStream(&responseBuf);
     int responseCode;
     QString responseMessage;
-    responseBufStream>>responseCode>>responseMessage;
+    int spaceIndex=responseBuf.indexOf(" ");
+    responseCode=responseBuf.mid(0,spaceIndex).toInt();
+    responseMessage=responseBuf.mid(spaceIndex+1);
     return qMakePair(responseCode,responseMessage);
 }
 
@@ -582,27 +631,17 @@ void MainWindow::initDataConn(){
         connect(dataServer,&QTcpServer::newConnection,this,&MainWindow::handlePortDataConn);
         changeServerStatus(ServerStatus::PORT_START);
     }
+    if(dataConnMode==DataConnMode::PASV){
+        dataSocket=new QTcpSocket();
+        changeServerStatus(ServerStatus::PASV_START);
+    }
 }
 
 void MainWindow::handlePortDataConn(){
     dataSocket=dataServer->nextPendingConnection();
     qDebug().noquote()<<"New data connection "<<dataSocket<<endl;
     connect(dataSocket, &QAbstractSocket::disconnected,this,&MainWindow::handleDataConnDisconnect);
-
-    if(serverStatus==ServerStatus::STOR_START){
-        QByteArray requestBuf=currentFile.readAll();
-        QTreeWidgetItem *item=taskList->topLevelItem(taskList->topLevelItemCount()-1);
-        QProgressBar* progressBar=qobject_cast<QProgressBar*>(taskList->itemWidget(item,1));
-        progressBar->setValue(progressBar->value()+requestBuf.size());
-        qDebug()<<"Read current file: "<<currentFile.fileName()<<" "<<requestBuf.size()<<" bytes";
-        dataSocket->write(requestBuf);
-        dataSocket->flush();
-        dataSocket->disconnectFromHost();
-        return;
-    }
-
     connect(dataSocket,&QTcpSocket::readyRead,this,&MainWindow::handleDataConnResponse);
-
 }
 
 void MainWindow::handleDataConnDisconnect(){
@@ -611,9 +650,11 @@ void MainWindow::handleDataConnDisconnect(){
     dataSocket->deleteLater();
     dataSocket=nullptr;
 
-    dataServer->close();
-    dataServer->deleteLater();
-    dataServer=nullptr;
+    if(dataServer!=nullptr){
+        dataServer->close();
+        dataServer->deleteLater();
+        dataServer=nullptr;
+    }
 
     dataConnStatus=DataConnStatus::DISCONNECT;
 
@@ -633,6 +674,21 @@ void MainWindow::handleDataConnDisconnect(){
         currentFile.close();
         changeServerStatus(ServerStatus::STOR_END);
         return ;
+    }
+}
+
+void MainWindow::handleDataConnRequest(){
+    qDebug().noquote()<<"Current Status: "<<stringifyServerStatus(serverStatus);
+    if(serverStatus==ServerStatus::STOR_START){
+        QByteArray requestBuf=currentFile.readAll();
+        QTreeWidgetItem *item=taskList->topLevelItem(taskList->topLevelItemCount()-1);
+        QProgressBar* progressBar=qobject_cast<QProgressBar*>(taskList->itemWidget(item,1));
+        progressBar->setValue(progressBar->value()+requestBuf.size());
+        qDebug()<<"Read current file: "<<currentFile.fileName()<<" "<<requestBuf.size()<<" bytes";
+        dataSocket->write(requestBuf);
+        dataSocket->flush();
+        dataSocket->disconnectFromHost();
+        return;
     }
 }
 
@@ -773,5 +829,29 @@ QString MainWindow::stringifyServerStatus(ServerStatus status){
     if(status==ServerStatus::RETR_END){
         return "RETR_END";
     }
-    return "";
+
+    if(status==ServerStatus::PWD_START){
+        return "PWD_START";
+    }
+    if(status==ServerStatus::PWD_END){
+        return "PWD_END";
+    }
+    if(status==ServerStatus::CWD_START){
+        return "CWD_START";
+    }
+    if(status==ServerStatus::CWD_END){
+        return "CWD_END";
+    }
+    if(status==ServerStatus::STOR_START){
+        return "STOR_START";
+    }
+    if(status==ServerStatus::STOR_END){
+        return "STOR_END";
+    }
+    if(status==ServerStatus::PASV_START){
+        return "PASV_START";
+    }
+    if(status==ServerStatus::PASV_END){
+        return "PASV_END";
+    }
 }

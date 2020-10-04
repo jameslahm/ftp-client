@@ -65,7 +65,9 @@ public:
         CWD_START,
         CWD_END,
         STOR_START,
-        STOR_END
+        STOR_END,
+        PASV_START,
+        PASV_END,
     };
 
 
@@ -90,7 +92,7 @@ public:
         RETR,
         PWD,
         CWD,
-        STOR
+        STOR,
     };
 
     QMap<RequestType,QString> RequestTypeMap{{RequestType::USER,"USER"},{RequestType::PASS,"PASS"},{RequestType::TYPE,"TYPE"},{RequestType::SYST,"SYST"}
@@ -143,6 +145,7 @@ public:
     void connectToServer();
     void handleCommandResponse();
     void handleDataConnResponse();
+    void handleDataConnRequest();
     void sendCommandRequest(RequestType requestType,QString args);
     void handleCommandError(QAbstractSocket::SocketError socketError);
     void changeDataConnMode(DataConnMode mode);
