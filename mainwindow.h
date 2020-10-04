@@ -23,6 +23,14 @@
 #include <QRadioButton>
 #include <QNetworkInterface>
 #include <QMessageBox>
+#include <QAction>
+#include <QMenu>
+#include <QIcon>
+#include <QProgressBar>
+#include <QDir>
+#include <QFileInfo>
+#include <QDateTime>
+#include <QFileDialog>
 
 class MainWindow : public QMainWindow
 {
@@ -37,6 +45,7 @@ public:
         COMMAND_CONNECT_START,
         // command socket end
         COMMAND_CONNECT_END,
+        IDLE,
         USER_START,
         USER_END,
         PASS_START,
@@ -47,11 +56,16 @@ public:
         TYPE_END,
         PORT_START,
         PORT_END,
-        PWD_START,
-        PWD_END,
         LIST_START,
         LIST_END,
-        IDLE
+        RETR_START,
+        RETR_END,
+        PWD_START,
+        PWD_END,
+        CWD_START,
+        CWD_END,
+        STOR_START,
+        STOR_END
     };
 
 
@@ -72,11 +86,16 @@ public:
         TYPE,
         PORT,
         PASV,
-        LIST
+        LIST,
+        RETR,
+        PWD,
+        CWD,
+        STOR
     };
 
     QMap<RequestType,QString> RequestTypeMap{{RequestType::USER,"USER"},{RequestType::PASS,"PASS"},{RequestType::TYPE,"TYPE"},{RequestType::SYST,"SYST"}
-                                             ,{RequestType::PORT,"PORT"},{RequestType::PASV,"PASV"},{RequestType::LIST,"LIST"}};
+                                             ,{RequestType::PORT,"PORT"},{RequestType::PASV,"PASV"},{RequestType::LIST,"LIST"},{RequestType::RETR,"RETR"},
+                                             {RequestType::PWD,"PWD"},{RequestType::CWD,"CWD"},{RequestType::STOR,"STOR"}};
 
     QLineEdit *serverAdressInput;
     QLineEdit *serverPortInput;
@@ -85,6 +104,8 @@ public:
 
     QPushButton *connectButton;
     QPushButton *quitButton;
+
+    QPushButton *returnToParentButton;
 
     QTreeWidget *localFileList;
     QTreeWidget *remoteFileList;
@@ -99,8 +120,14 @@ public:
     QTcpSocket* dataSocket=nullptr;
     QTcpServer* dataServer=nullptr;
 
-    QString localDirPath=nullptr;
+    QDir localDir;
+    QLabel* localDirPathLabel;
+    QLabel* remoteDirPathLabel;
     QString remoteDirPath=nullptr;
+    QString remoteRootDirPath=nullptr;
+
+    QFile currentFile;
+    QString currentFileName=nullptr;
 
     QHash<QString, bool> isLocalDirectory;
     QHash<QString,bool> isRemoteDirectory;
@@ -110,6 +137,7 @@ public:
     DataConnStatus dataConnStatus=DataConnStatus::DISCONNECT;
 
     ServerStatus serverStatus=ServerStatus::COMMAND_CONNECT_START;
+    ServerStatus resumeServerStatus = ServerStatus::COMMAND_CONNECT_START;
 
     void centerAndResize();
     void connectToServer();
@@ -120,9 +148,14 @@ public:
     void changeDataConnMode(DataConnMode mode);
     void changeServerStatus(ServerStatus status);
     void initDataConn();
+    void handleContextMenu(QPoint pos,QString fileListType);
     QPair<int,QString> parseCommandResponse(QString commandBuf);
     void handlePortDataConn();
-
+    void handleDataConnDisconnect();
+    QString stringifyServerStatus(ServerStatus status);
+    void changeLocalDir(QString path);
+    void changeRemoteDir(QString path);
+    void addTask(QString taskName,int maximum);
 };
 
 #endif // MAINWINDOW_H
