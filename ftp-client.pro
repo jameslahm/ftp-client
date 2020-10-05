@@ -4,7 +4,7 @@
 #
 #-------------------------------------------------
 
-QT       += core gui network
+QT       += core gui network concurrent
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -26,10 +26,12 @@ CONFIG += c++11
 
 SOURCES += \
         main.cpp \
-        mainwindow.cpp
+        mainwindow.cpp \
+        readworker.cpp
 
 HEADERS += \
-        mainwindow.h
+        mainwindow.h \
+        readworker.h
 
 # Default rules for deployment.
 qnx: target.path = /tmp/$${TARGET}/bin

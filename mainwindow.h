@@ -31,6 +31,12 @@
 #include <QFileInfo>
 #include <QDateTime>
 #include <QFileDialog>
+#include <QInputDialog>
+#include <QScrollBar>
+#include <QThread>
+#include <QVector>
+
+#include "readworker.h"
 
 class MainWindow : public QMainWindow
 {
@@ -68,6 +74,12 @@ public:
         STOR_END,
         PASV_START,
         PASV_END,
+        MKD_START,
+        MKD_END,
+        RMD_START,
+        RMD_END,
+        DELE_START,
+        DELE_END
     };
 
 
@@ -93,11 +105,16 @@ public:
         PWD,
         CWD,
         STOR,
+        MKD,
+        RMD,
+        DELE
     };
 
     QMap<RequestType,QString> RequestTypeMap{{RequestType::USER,"USER"},{RequestType::PASS,"PASS"},{RequestType::TYPE,"TYPE"},{RequestType::SYST,"SYST"}
                                              ,{RequestType::PORT,"PORT"},{RequestType::PASV,"PASV"},{RequestType::LIST,"LIST"},{RequestType::RETR,"RETR"},
-                                             {RequestType::PWD,"PWD"},{RequestType::CWD,"CWD"},{RequestType::STOR,"STOR"}};
+                                             {RequestType::PWD,"PWD"},{RequestType::CWD,"CWD"},{RequestType::STOR,"STOR"},
+                                             {RequestType::MKD,"MKD"},{RequestType::RMD,"RMD"},{RequestType::DELE,"DELE"}
+                                             };
 
     QLineEdit *serverAdressInput;
     QLineEdit *serverPortInput;
