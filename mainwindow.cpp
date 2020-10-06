@@ -6,14 +6,17 @@ MainWindow::MainWindow(QWidget *parent)
     qSetMessagePattern("[%{type}] %{appname} (%{file}:%{line}) - %{message}");
 
     QLabel *serverAdressLabel = new QLabel(tr("IP/Host"));
+//    serverAdressInput =new QLineEdit("139.196.81.14");
     serverAdressInput =new QLineEdit("127.0.0.1");
     QLabel *serverPortLabel = new QLabel(tr("Port"));
-    serverPortInput = new QLineEdit("21");
+//    serverPortInput = new QLineEdit("21");
+    serverPortInput = new QLineEdit("12345");
 
     QLabel *userNameLabel=new QLabel(tr("Username"));
+//    userNameInput = new QLineEdit("vsftp");
     userNameInput = new QLineEdit("anonymous");
     QLabel *passwordLabel = new QLabel(tr("Password"));
-    passwordInput = new QLineEdit;
+    passwordInput = new QLineEdit("vsftp123");
     passwordInput->setEchoMode(QLineEdit::Password);
 
     QGroupBox *groupRadioBox = new QGroupBox(tr("Data Connection Mode"));
@@ -146,7 +149,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(localFileList,&QTreeWidget::itemDoubleClicked,[=](QTreeWidgetItem* item,int){if(item){
             this->changeLocalDir(item->text(0));
         }});
-    connect(remoteFileList,&QTreeWidget::itemDoubleClicked,[=](QTreeWidgetItem* item,int){if(item){
+    connect(remoteFileList,&QTreeWidget::itemDoubleClicked,[=](QTreeWidgetItem* item,int){if(item && isRemoteDirectory[item->text(0)]){
             this->changeRemoteDir(item->text(0));
         }});
 
@@ -222,6 +225,7 @@ void MainWindow::changeRemoteDir(QString path){
             destPath=destPath+path;
         }
     }
+    changeServerStatus(ServerStatus::CWD_START);
     sendCommandRequest(RequestType::CWD,destPath+"\r\n");
     remoteDirPathLabel->setText(destPath);
 
@@ -236,8 +240,6 @@ void MainWindow::changeRemoteDir(QString path){
     QString logString=QString("Set remote dir %1").arg(remoteDirPath);
     qInfo().noquote()<<logString;
     statusLabel->setText(logString);
-
-    changeServerStatus(ServerStatus::CWD_START);
 }
 
 
@@ -394,7 +396,8 @@ void MainWindow::handleCommandResponse(){
         if(tmpBuf.indexOf("-")==-1){
             isResponseEnd=true;
         }
-        QString tmpBufToParse=tmpBuf.replace("-"," ");
+        QString tmpBufToParse=tmpBuf;
+        tmpBufToParse.replace("-"," ");
         QPair<int,QString> parseRes=parseCommandResponse(tmpBufToParse);
         responseCode=parseRes.first;
 
@@ -471,10 +474,11 @@ void MainWindow::handleCommandResponse(){
             responseBufStream>>ip_1>>ip_2>>ip_3>>ip_4>>port_1>>port_2;
             QString ip=ip_1+"."+ip_2+"."+ip_3+"."+ip_4;
             int port=port_1.toInt()*256+port_2.toInt();
-            QString logString=QString("Connect to: %1:%2").arg(ip).arg(port);
+            QString logString=QString("Connect to: %1:%2").arg(serverAdressInput->text()).arg(port);
             qInfo().noquote()<<logString;
             statusLabel->setText(logString);
-            dataSocket->connectToHost(ip,(unsigned short)port);
+            // TODO: check ip
+            dataSocket->connectToHost(serverAdressInput->text(),(unsigned short)port);
             changeServerStatus(ServerStatus::PASV_END);
             return;
         }
@@ -594,7 +598,7 @@ void MainWindow::changeServerStatus(ServerStatus status){
         return;
     }
     if(status==ServerStatus::SYST_START){
-        sendCommandRequest(RequestType::SYST,passwordInput->text()+"\r\n");
+        sendCommandRequest(RequestType::SYST,"\r\n");
         return;
     }
     if(status==ServerStatus::SYST_END){
@@ -759,6 +763,7 @@ void MainWindow::changeServerStatus(ServerStatus status){
         return;
     }
     if(status==ServerStatus::QUIT_END){
+        remoteDirPath=nullptr;
         commandSocket->close();
         commandSocket->deleteLater();
         commandSocket=nullptr;
@@ -837,6 +842,13 @@ void MainWindow::handleDataConnDisconnect(){
     QString logString="Data Conn disconnect";
     qInfo().noquote()<<logString;
     statusLabel->setText(logString);
+
+    qInfo().noquote()<<"Empty response: "<<emptyResponse;
+    if(emptyResponse){
+        handleDataConnEmptyResponse();
+    }
+    emptyResponse=true;
+
     dataSocket->close();
     dataSocket->deleteLater();
     dataSocket=nullptr;
@@ -913,8 +925,17 @@ void MainWindow::handleDataConnRequest(){
     }
 }
 
+void MainWindow::handleDataConnEmptyResponse(){
+    qInfo().noquote()<<"Current Status: "<<stringifyServerStatus(serverStatus);
+    if(resumeServerStatus==ServerStatus::LIST_START){
+        isRemoteDirectory.clear();
+        remoteFileList->clear();
+    }
+}
+
 void MainWindow::handleDataConnResponse(){
     qInfo().noquote()<<"Current Status: "<<stringifyServerStatus(serverStatus);
+    emptyResponse=false;
     if(serverStatus==ServerStatus::RETR_START){
         QByteArray responseBuf=dataSocket->readAll();
         currentFile.write(responseBuf);
@@ -934,9 +955,6 @@ void MainWindow::handleDataConnResponse(){
         QString owner;
         QString group;
         QString size;
-        QString month;
-        QString day;
-        QString year;
         QString name;
         QString time;
         QString tmp;
@@ -949,9 +967,19 @@ void MainWindow::handleDataConnResponse(){
             QString lineBuf=responseBufStream.readLine();
             QTextStream lineBufStream(&lineBuf);
 
-            lineBufStream>>permission>>tmp>>owner>>group>>size>>month>>day>>year>>name;
+            lineBufStream>>permission>>tmp>>owner>>group>>size;
 
-            time=month+" "+day+" "+year;
+            while(!lineBufStream.atEnd()){
+                QString tmpBuf;
+                lineBufStream>>tmpBuf;
+                if(lineBufStream.atEnd()){
+                    name=tmpBuf;
+                }
+                else{
+                    time+=" ";
+                    time+=tmpBuf;
+                }
+            }
 
             QTreeWidgetItem *item=new QTreeWidgetItem;
             item->setText(0,name);

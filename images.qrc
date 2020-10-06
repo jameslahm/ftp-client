@@ -6,5 +6,6 @@
         <file>images/delete.png</file>
         <file>images/dir.png</file>
         <file>images/file.png</file>
+        <file>images/new_dir.png</file>
     </qresource>
 </RCC>

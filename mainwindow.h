@@ -169,6 +169,8 @@ public:
     ServerStatus serverStatus=ServerStatus::COMMAND_DISCONNECT;
     ServerStatus resumeServerStatus = ServerStatus::COMMAND_DISCONNECT;
 
+    bool emptyResponse=true;
+
     void centerAndResize();
     void connectToServer();
     void handleCommandResponse();
@@ -189,6 +191,7 @@ public:
     void addTask(QString taskName,int maximum);
     void addLogToPanel(QString requestBuf);
     void addLogToPanel(int responseCode,QString tmpBuf);
+    void handleDataConnEmptyResponse();
 };
 
 #endif // MAINWINDOW_H
