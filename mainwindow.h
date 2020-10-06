@@ -47,6 +47,7 @@ public:
     ~MainWindow();
 
     enum class ServerStatus {
+        COMMAND_DISCONNECT,
         // command socket start connect
         COMMAND_CONNECT_START,
         // command socket end
@@ -79,7 +80,13 @@ public:
         RMD_START,
         RMD_END,
         DELE_START,
-        DELE_END
+        DELE_END,
+        RNFR_START,
+        RNFR_END,
+        RNTO_START,
+        RNTO_END,
+        QUIT_START,
+        QUIT_END
     };
 
 
@@ -107,13 +114,17 @@ public:
         STOR,
         MKD,
         RMD,
-        DELE
+        DELE,
+        RNFR,
+        RNTO,
+        QUIT
     };
 
     QMap<RequestType,QString> RequestTypeMap{{RequestType::USER,"USER"},{RequestType::PASS,"PASS"},{RequestType::TYPE,"TYPE"},{RequestType::SYST,"SYST"}
                                              ,{RequestType::PORT,"PORT"},{RequestType::PASV,"PASV"},{RequestType::LIST,"LIST"},{RequestType::RETR,"RETR"},
                                              {RequestType::PWD,"PWD"},{RequestType::CWD,"CWD"},{RequestType::STOR,"STOR"},
-                                             {RequestType::MKD,"MKD"},{RequestType::RMD,"RMD"},{RequestType::DELE,"DELE"}
+                                             {RequestType::MKD,"MKD"},{RequestType::RMD,"RMD"},{RequestType::DELE,"DELE"},
+                                             {RequestType::RNFR,"RNFR"},{RequestType::RNTO,"RNTO"},{RequestType::QUIT,"QUIT"}
                                              };
 
     QLineEdit *serverAdressInput;
@@ -155,8 +166,8 @@ public:
 
     DataConnStatus dataConnStatus=DataConnStatus::DISCONNECT;
 
-    ServerStatus serverStatus=ServerStatus::COMMAND_CONNECT_START;
-    ServerStatus resumeServerStatus = ServerStatus::COMMAND_CONNECT_START;
+    ServerStatus serverStatus=ServerStatus::COMMAND_DISCONNECT;
+    ServerStatus resumeServerStatus = ServerStatus::COMMAND_DISCONNECT;
 
     void centerAndResize();
     void connectToServer();
@@ -176,6 +187,8 @@ public:
     void changeLocalDir(QString path);
     void changeRemoteDir(QString path);
     void addTask(QString taskName,int maximum);
+    void addLogToPanel(QString requestBuf);
+    void addLogToPanel(int responseCode,QString tmpBuf);
 };
 
 #endif // MAINWINDOW_H

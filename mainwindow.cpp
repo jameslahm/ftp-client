@@ -3,6 +3,8 @@
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
+    qSetMessagePattern("[%{type}] %{appname} (%{file}:%{line}) - %{message}");
+
     QLabel *serverAdressLabel = new QLabel(tr("IP/Host"));
     serverAdressInput =new QLineEdit("127.0.0.1");
     QLabel *serverPortLabel = new QLabel(tr("Port"));
@@ -136,7 +138,11 @@ MainWindow::MainWindow(QWidget *parent)
     localFileList->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(localFileList,&QTreeWidget::customContextMenuRequested,[=](QPoint pos){this->handleContextMenu(pos,"LOCAL");});
 
-    connect(connectButton,&QPushButton::clicked,[=](){this->connectToServer();});
+    connect(connectButton,&QPushButton::clicked,[=](){this->changeServerStatus(ServerStatus::COMMAND_CONNECT_START);});
+    connect(quitButton,&QPushButton::clicked,[=](){
+        this->changeServerStatus(ServerStatus::QUIT_START);
+    });
+
     connect(localFileList,&QTreeWidget::itemDoubleClicked,[=](QTreeWidgetItem* item,int){if(item){
             this->changeLocalDir(item->text(0));
         }});
@@ -173,7 +179,9 @@ void MainWindow::changeLocalDir(QString path){
         localDir.refresh();
     }
 
-    qDebug()<<"Set local dir: "<<localDir.absolutePath();
+    QString logString=QString("Set local dir %1").arg(localDir.absolutePath());
+    qInfo().noquote()<<logString;
+    statusLabel->setText(logString);
     localDirPathLabel->setText(localDir.absolutePath());
 
     foreach(QFileInfo fileInfo,localDir.entryInfoList()){
@@ -198,7 +206,7 @@ void MainWindow::changeRemoteDir(QString path){
     if(path==".."){
         QList<QString> destPathList=destPath.split("/");
         destPathList.pop_back();
-        qDebug()<<destPathList<<endl;
+        qInfo().noquote()<<destPathList;
         if(destPathList.length()==1){
             destPath="/";
         }
@@ -225,7 +233,9 @@ void MainWindow::changeRemoteDir(QString path){
         returnToParentButton->setEnabled(true);
     }
     remoteDirPath=destPath;
-    qDebug()<<"RemoteDirPath: "<<remoteDirPath<<endl;
+    QString logString=QString("Set remote dir %1").arg(remoteDirPath);
+    qInfo().noquote()<<logString;
+    statusLabel->setText(logString);
 
     changeServerStatus(ServerStatus::CWD_START);
 }
@@ -236,11 +246,11 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
         QTreeWidgetItem* item=remoteFileList->itemAt(pos);
 
         if(item!=nullptr){
-            QAction *downloadAction=new QAction(tr("Download"));
             QMenu menu(this);
 
             if(isRemoteDirectory[item->text(0)]){
                 QAction *rmdAction =new QAction(tr("Delete Dir"));
+                rmdAction->setIcon(QIcon(":/images/delete.png"));
                 connect(rmdAction,&QAction::triggered,[=](){
                     int ret = QMessageBox::warning(this, tr("Confirm"),
                                                    tr("Are you sure to delete the dir?"),
@@ -254,8 +264,10 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                 menu.addAction(rmdAction);
             }
 
-            if(!isRemoteDirectory[item->text(1)]){
+            if(!isRemoteDirectory[item->text(0)]){
                 QAction *rmfAction =new QAction(tr("Delete file"));
+                rmfAction->setIcon(QIcon(":/images/delete.png"));
+
                 connect(rmfAction,&QAction::triggered,[=](){
                     int ret = QMessageBox::warning(this, tr("Confirm"),
                                                    tr("Are you sure to delete the file?"),
@@ -266,22 +278,32 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                         this->changeServerStatus(ServerStatus::DELE_START);
                         this->sendCommandRequest(RequestType::DELE,item->text(0)+"\r\n");
                     }});
+
                 menu.addAction(rmfAction);
+
+                QAction *downloadAction=new QAction(tr("Download"));
+                downloadAction->setIcon(QIcon(":/images/download.png"));
+                connect(downloadAction,&QAction::triggered,[=](){
+                    this->currentFileName=item->text(0);
+                    this->addTask(this->currentFileName,item->text(1).toInt());
+                    this->changeServerStatus(ServerStatus::RETR_START);
+                });
+                menu.addAction(downloadAction);
             }
 
-
-
-            connect(downloadAction,&QAction::triggered,[=](){
-                this->currentFileName=item->text(0);
-                this->addTask(this->currentFileName,item->text(1).toInt());
-                this->changeServerStatus(ServerStatus::RETR_START);
+            QAction *rnAction=new QAction(tr("Rename"));
+            rnAction->setIcon(QIcon(":/images/rename.png"));
+            connect(rnAction,&QAction::triggered,[=](){
+                this->changeServerStatus(ServerStatus::RNFR_START);
+                this->sendCommandRequest(RequestType::RNFR,item->text(0)+"\r\n");
             });
-            menu.addAction(downloadAction);
+            menu.addAction(rnAction);
 
             menu.exec(remoteFileList->mapToGlobal(pos));
         }
         else{
             QAction *mkdAction=new QAction(tr("New Dir"));
+            mkdAction->setIcon(QIcon(":/images/new_dir.png"));
             QMenu menu(this);
             connect(mkdAction,&QAction::triggered,[=](){
                 bool ok;
@@ -292,7 +314,7 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                 dialog->resize(400,200);
                 ok=dialog->exec();
                 QString text=dialog->textValue();
-                qDebug().noquote()<<"Dialog result: "<<ok<<" "<<text<<endl;
+                qInfo().noquote()<<"Dialog result: "<<ok<<" "<<text;
                 if(ok && !text.isEmpty()){
                     this->changeServerStatus(ServerStatus::MKD_START);
                     this->sendCommandRequest(RequestType::MKD,text+"\r\n");
@@ -308,19 +330,21 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
         QTreeWidgetItem* item=localFileList->itemAt(pos);
 
         if(item!=nullptr){
-            QAction *uploadAction=new QAction(tr("Upload"));
+
             QMenu menu(this);
-            connect(uploadAction,&QAction::triggered,[=](){
-                this->currentFileName=item->text(0);
-                this->addTask(this->currentFileName,item->text(1).toInt());
-                this->changeServerStatus(ServerStatus::STOR_START);
-            });
-
-            if(serverStatus==ServerStatus::COMMAND_CONNECT_START){
-                uploadAction->setEnabled(false);
+            if(!isLocalDirectory[item->text(0)]){
+                QAction *uploadAction=new QAction(tr("Upload"));
+                uploadAction->setIcon(QIcon(":/images/upload.png"));
+                connect(uploadAction,&QAction::triggered,[=](){
+                    this->currentFileName=item->text(0);
+                    this->addTask(this->currentFileName,item->text(1).toInt());
+                    this->changeServerStatus(ServerStatus::STOR_START);
+                });
+                if(serverStatus==ServerStatus::COMMAND_DISCONNECT){
+                    uploadAction->setEnabled(false);
+                }
+                menu.addAction(uploadAction);
             }
-
-            menu.addAction(uploadAction);
             menu.exec(localFileList->mapToGlobal(pos));
         }
     }
@@ -328,25 +352,15 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
 
 void MainWindow::changeDataConnMode(DataConnMode mode){
     this->dataConnMode = mode;
-    qDebug().noquote()<<"Change mode ";
+    QString logString;
     if(mode==DataConnMode::PASV){
-        qDebug().noquote()<<"PASV"<<endl;
+        logString=QString("Change mode to PASV");
     }
     else{
-        qDebug().noquote()<<"PORT"<<endl;
+        logString=QString("Change mode to PORT");;
     }
-}
-
-void MainWindow::connectToServer(){
-    commandSocket=new QTcpSocket(this);
-    connectButton->setEnabled(false);
-
-    connect(commandSocket,&QIODevice::readyRead,[=](){this->handleCommandResponse();});
-
-    connect(commandSocket,QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),this,&MainWindow::handleCommandError);
-    commandSocket->connectToHost(serverAdressInput->text(),serverPortInput->text().toUShort());
-
-    serverStatus=ServerStatus::COMMAND_CONNECT_START;
+    qInfo().noquote()<<logString;
+    statusLabel->setText(logString);
 }
 
 void MainWindow::handleCommandError(QAbstractSocket::SocketError socketError){
@@ -354,19 +368,19 @@ void MainWindow::handleCommandError(QAbstractSocket::SocketError socketError){
     case QAbstractSocket::RemoteHostClosedError:
         break;
     case QAbstractSocket::HostNotFoundError:
-        qDebug().noquote()<<"Host not found"<<endl;
+        qCritical().noquote()<<"Host not found";
         break;
     case QAbstractSocket::ConnectionRefusedError:
-        qDebug().noquote()<<"Connection refused"<<endl;
+        qCritical().noquote()<<"Connection refused";
         break;
     default:
-        qDebug().noquote()<<"Some error happend"<<endl;
+        qCritical().noquote()<<"Some error happend";
     }
 }
 
 void MainWindow::handleCommandResponse(){
 
-    qDebug()<<"Start parse response: ";
+    qInfo().noquote()<<"Start parse response: ";
     bool isResponseEnd=false;
     QString responseBuf;
     int responseCode=-1;
@@ -375,51 +389,24 @@ void MainWindow::handleCommandResponse(){
         if(tmpBuf.isEmpty()){
             break;
         }
-        logPanel->appendPlainText(tmpBuf);
-        logPanel->verticalScrollBar()->setValue(logPanel->verticalScrollBar()->maximum());
-        qDebug().noquote()<<"Response: "<<tmpBuf;
+
+        qInfo().noquote()<<"Response: "<<tmpBuf;
         if(tmpBuf.indexOf("-")==-1){
             isResponseEnd=true;
         }
-        tmpBuf=tmpBuf.replace("-"," ");
-        QPair<int,QString> parseRes=parseCommandResponse(tmpBuf);
+        QString tmpBufToParse=tmpBuf.replace("-"," ");
+        QPair<int,QString> parseRes=parseCommandResponse(tmpBufToParse);
         responseCode=parseRes.first;
+
+        addLogToPanel(responseCode,tmpBuf);
+
         responseBuf+=parseRes.second;
     }
-    qDebug()<<"Parse response successfully"<<endl;
+    qInfo().noquote()<<"Parse response successfully";
 
     if(responseCode==150){
         if(commandSocket->bytesAvailable()!=0){
             handleCommandResponse();
-            return;
-        }
-    }
-
-    if(responseCode==220){
-        // command connect success
-        if(serverStatus==ServerStatus::COMMAND_CONNECT_START){
-            changeServerStatus(ServerStatus::COMMAND_CONNECT_END);
-            return;
-        }
-    }
-
-    if(responseCode==331){
-        if(serverStatus==ServerStatus::USER_START){
-            changeServerStatus(ServerStatus::USER_END);
-            return;
-        }
-    }
-
-    if(responseCode==230){
-        if(serverStatus==ServerStatus::PASS_START){
-            changeServerStatus(ServerStatus::PASS_END);
-            return;
-        }
-    }
-
-    if(responseCode==215){
-        if(serverStatus==ServerStatus::SYST_START){
-            changeServerStatus(ServerStatus::SYST_END);
             return;
         }
     }
@@ -431,6 +418,27 @@ void MainWindow::handleCommandResponse(){
         }
         if(serverStatus==ServerStatus::PORT_START){
             changeServerStatus(ServerStatus::PORT_END);
+            return;
+        }
+    }
+
+    if(responseCode==215){
+        if(serverStatus==ServerStatus::SYST_START){
+            changeServerStatus(ServerStatus::SYST_END);
+            return;
+        }
+    }
+
+    if(responseCode==220){
+        // command connect success
+        if(serverStatus==ServerStatus::COMMAND_CONNECT_START){
+            changeServerStatus(ServerStatus::COMMAND_CONNECT_END);
+            return;
+        }
+    }
+    if(responseCode==221){
+        if(serverStatus==ServerStatus::QUIT_START){
+            changeServerStatus(ServerStatus::QUIT_END);
             return;
         }
     }
@@ -447,34 +455,6 @@ void MainWindow::handleCommandResponse(){
         }
     }
 
-    if(responseCode==257){
-        if(serverStatus==ServerStatus::PWD_START){
-            QTextStream tmpStream(&responseBuf);
-            tmpStream>>remoteDirPath;
-            remoteDirPath=remoteDirPath.section('"',1,1);
-            qDebug().noquote()<<"Remote dir path: "<<remoteDirPath<<endl;
-            if(remoteRootDirPath==nullptr){
-                remoteRootDirPath=remoteDirPath;
-            }
-            remoteDirPathLabel->setText(remoteDirPath);
-            changeServerStatus(ServerStatus::PWD_END);
-            return;
-        }
-        if(serverStatus==ServerStatus::MKD_START){
-            changeServerStatus(ServerStatus::MKD_END);
-        }
-    }
-    if(responseCode==250){
-        if(serverStatus==ServerStatus::CWD_START){
-            changeServerStatus(ServerStatus::CWD_END);
-        }
-        if(serverStatus==ServerStatus::RMD_START){
-            changeServerStatus(ServerStatus::RMD_END);
-        }
-        if(serverStatus==ServerStatus::DELE_START){
-            changeServerStatus(ServerStatus::DELE_END);
-        }
-    }
     if(responseCode==227){
         if(serverStatus==ServerStatus::PASV_START){
             int leftBracketIndex=responseBuf.indexOf("(");
@@ -491,26 +471,109 @@ void MainWindow::handleCommandResponse(){
             responseBufStream>>ip_1>>ip_2>>ip_3>>ip_4>>port_1>>port_2;
             QString ip=ip_1+"."+ip_2+"."+ip_3+"."+ip_4;
             int port=port_1.toInt()*256+port_2.toInt();
-            qDebug().noquote()<<"Connect to: "<<ip<<":"<<port;
+            QString logString=QString("Connect to: %1:%2").arg(ip).arg(port);
+            qInfo().noquote()<<logString;
+            statusLabel->setText(logString);
             dataSocket->connectToHost(ip,(unsigned short)port);
             changeServerStatus(ServerStatus::PASV_END);
             return;
         }
 
     }
+
+    if(responseCode==230){
+        if(serverStatus==ServerStatus::PASS_START){
+            changeServerStatus(ServerStatus::PASS_END);
+            return;
+        }
+    }
+
+    if(responseCode==250){
+        if(serverStatus==ServerStatus::CWD_START){
+            changeServerStatus(ServerStatus::CWD_END);
+            return;
+        }
+        if(serverStatus==ServerStatus::RMD_START){
+            changeServerStatus(ServerStatus::RMD_END);
+            return;
+        }
+        if(serverStatus==ServerStatus::DELE_START){
+            changeServerStatus(ServerStatus::DELE_END);
+            return;
+        }
+        if(serverStatus==ServerStatus::RNTO_START){
+            changeServerStatus(ServerStatus::RNTO_END);
+            return;
+        }
+    }
+
+    if(responseCode==257){
+        if(serverStatus==ServerStatus::PWD_START){
+            QTextStream tmpStream(&responseBuf);
+            tmpStream>>remoteDirPath;
+            remoteDirPath=remoteDirPath.section('"',1,1);
+            qInfo().noquote()<<"Remote dir path: "<<remoteDirPath;
+            if(remoteRootDirPath==nullptr){
+                remoteRootDirPath=remoteDirPath;
+            }
+            remoteDirPathLabel->setText(remoteDirPath);
+            changeServerStatus(ServerStatus::PWD_END);
+            return;
+        }
+        if(serverStatus==ServerStatus::MKD_START){
+            changeServerStatus(ServerStatus::MKD_END);
+            return;
+        }
+    }
+
+    if(responseCode==331){
+        if(serverStatus==ServerStatus::USER_START){
+            changeServerStatus(ServerStatus::USER_END);
+            return;
+        }
+    }
+
+    if(responseCode==350){
+        if(serverStatus==ServerStatus::RNFR_START){
+            changeServerStatus(ServerStatus::RNFR_END);
+            return;
+        }
+    }
+
+    if(responseCode==421){
+        if(serverStatus==ServerStatus::IDLE){
+            changeServerStatus(ServerStatus::QUIT_END);
+        }
+    }
+
     if(responseCode==550){
         if(serverStatus==ServerStatus::RMD_START){
             QMessageBox::critical(this,tr("Error"),tr("Dir is not empty"));
             changeServerStatus(ServerStatus::RMD_END);
+            return;
         }
     }
-
 }
 
+
 void MainWindow::changeServerStatus(ServerStatus status){
-    qDebug().noquote()<<"Change serverStatus from "<<stringifyServerStatus(serverStatus)<<" to"<<stringifyServerStatus(status)<<endl;
+    qInfo().noquote()<<"Change serverStatus from "<<stringifyServerStatus(serverStatus)<<" to"<<stringifyServerStatus(status)<<endl;
     serverStatus=status;
+    if(status==ServerStatus::COMMAND_DISCONNECT){
+        connectButton->setEnabled(true);
+        return;
+    }
+    if(status==ServerStatus::COMMAND_CONNECT_START){
+        commandSocket=new QTcpSocket(this);
+
+        connect(commandSocket,&QIODevice::readyRead,[=](){this->handleCommandResponse();});
+
+        connect(commandSocket,QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),this,&MainWindow::handleCommandError);
+        commandSocket->connectToHost(serverAdressInput->text(),serverPortInput->text().toUShort());
+        return;
+    }
     if(status==ServerStatus::COMMAND_CONNECT_END){
+        connectButton->setEnabled(false);
         changeServerStatus(ServerStatus::USER_START);
         return;
     }
@@ -559,7 +622,7 @@ void MainWindow::changeServerStatus(ServerStatus status){
     }
     if(status==ServerStatus::PORT_END){
         dataConnStatus=DataConnStatus::CONNECT;
-        qDebug().noquote()<<"Resume status: "<<stringifyServerStatus(resumeServerStatus)<<endl;
+        qInfo().noquote()<<"Resume status: "<<stringifyServerStatus(resumeServerStatus);
         changeServerStatus(resumeServerStatus);
         return;
     }
@@ -569,7 +632,7 @@ void MainWindow::changeServerStatus(ServerStatus status){
     }
     if(status==ServerStatus::PASV_END){
         dataConnStatus=DataConnStatus::CONNECT;
-        qDebug().noquote()<<"Resume status: "<<stringifyServerStatus(resumeServerStatus)<<endl;
+        qInfo().noquote()<<"Resume status: "<<stringifyServerStatus(resumeServerStatus);
 
         connect(dataSocket, &QAbstractSocket::disconnected,this,&MainWindow::handleDataConnDisconnect);
         connect(dataSocket,&QTcpSocket::readyRead,this,&MainWindow::handleDataConnResponse);
@@ -615,7 +678,7 @@ void MainWindow::changeServerStatus(ServerStatus status){
             currentFile.setFileName(currentFileName);
             if(!currentFile.open(QIODevice::WriteOnly)){
 
-                qDebug().noquote()<<"can't open file"<<endl;
+                qCritical().noquote()<<"Can't open file";
             }
             sendCommandRequest(RequestType::RETR,currentFileName+"\r\n");
             return;
@@ -634,8 +697,9 @@ void MainWindow::changeServerStatus(ServerStatus status){
             currentFile.setFileName(currentFileName);
             if(!currentFile.open(QIODevice::ReadOnly)){
 
-                qDebug().noquote()<<"can't open file"<<endl;
+                qCritical().noquote()<<"Can't open file";
             }
+
             sendCommandRequest(RequestType::STOR,currentFileName+"\r\n");
 
             handleDataConnRequest();
@@ -665,6 +729,45 @@ void MainWindow::changeServerStatus(ServerStatus status){
     if(status==ServerStatus::DELE_END){
         changeServerStatus(ServerStatus::LIST_START);
     }
+    if(status==ServerStatus::RNFR_START){
+        return;
+    }
+    if(status==ServerStatus::RNFR_END){
+        changeServerStatus(ServerStatus::RNTO_START);
+        return;
+    }
+    if(status==ServerStatus::RNTO_START){
+        bool ok;
+        QInputDialog *dialog=new QInputDialog;
+        dialog->setInputMode(QInputDialog::TextInput);
+        dialog->setLabelText("File Name");
+        dialog->setWindowTitle("Please input the file name");
+        dialog->resize(400,200);
+        ok=dialog->exec();
+        QString text=dialog->textValue();
+        qInfo().noquote()<<"Dialog result: "<<ok<<" "<<text;
+        if(ok && !text.isEmpty()){
+            this->sendCommandRequest(RequestType::RNTO,text+"\r\n");
+        }
+    }
+    if(status==ServerStatus::RNTO_END){
+        changeServerStatus(ServerStatus::LIST_START);
+        return;
+    }
+    if(status==ServerStatus::QUIT_START){
+        sendCommandRequest(RequestType::QUIT,"\r\n");
+        return;
+    }
+    if(status==ServerStatus::QUIT_END){
+        commandSocket->close();
+        commandSocket->deleteLater();
+        commandSocket=nullptr;
+        if(dataSocket!=nullptr){
+            handleDataConnDisconnect();
+        }
+        changeServerStatus(ServerStatus::COMMAND_DISCONNECT);
+        return;
+    }
 }
 
 void MainWindow::addTask(QString taskName, int maximum){
@@ -686,9 +789,8 @@ void MainWindow::sendCommandRequest(RequestType requestType, QString requestArgs
     block.append(requestBuf);
     commandSocket->write(block);
     commandSocket->flush();
-    logPanel->appendPlainText(requestBuf);
-    logPanel->verticalScrollBar()->setValue(logPanel->verticalScrollBar()->maximum());
-    qDebug().noquote()<<"Request: "<<requestBuf;
+    addLogToPanel(requestBuf);
+    qInfo().noquote()<<"Request: "<<requestBuf;
 }
 
 QPair<int,QString> MainWindow::parseCommandResponse(QString responseBuf){
@@ -722,7 +824,7 @@ void MainWindow::initDataConn(){
 
 void MainWindow::handlePortDataConn(){
     dataSocket=dataServer->nextPendingConnection();
-    qDebug().noquote()<<"New data connection "<<dataSocket<<endl;
+    qInfo().noquote()<<"New data connection "<<dataSocket;
     connect(dataSocket, &QAbstractSocket::disconnected,this,&MainWindow::handleDataConnDisconnect);
     connect(dataSocket,&QTcpSocket::readyRead,this,&MainWindow::handleDataConnResponse);
 
@@ -732,7 +834,9 @@ void MainWindow::handlePortDataConn(){
 }
 
 void MainWindow::handleDataConnDisconnect(){
-    qDebug()<<"Data Conn disconnect"<<endl;
+    QString logString="Data Conn disconnect";
+    qInfo().noquote()<<logString;
+    statusLabel->setText(logString);
     dataSocket->close();
     dataSocket->deleteLater();
     dataSocket=nullptr;
@@ -750,14 +854,14 @@ void MainWindow::handleDataConnDisconnect(){
         return;
     }
     if(serverStatus==ServerStatus::RETR_START){
-        qDebug()<<"Close current file: "<<currentFile.fileName();
+        qInfo().noquote()<<"Close current file: "<<currentFile.fileName();
         currentFile.close();
         changeLocalDir(".");
         changeServerStatus(ServerStatus::RETR_END);
         return ;
     }
     if(serverStatus==ServerStatus::STOR_START){
-        qDebug()<<"Close current file: "<<currentFile.fileName();
+        qInfo().noquote()<<"Close current file: "<<currentFile.fileName();
         currentFile.close();
         changeServerStatus(ServerStatus::STOR_END);
         return ;
@@ -767,6 +871,7 @@ void MainWindow::handleDataConnDisconnect(){
 void MainWindow::handleDataConnRequest(){
     if(dataConnMode==DataConnMode::PASV){
         if(dataSocket->state()==QTcpSocket::ConnectingState){
+            qInfo().noquote()<<"Still connecting...";
             connect(dataSocket,&QTcpSocket::connected,this,&MainWindow::handleDataConnRequest);
             return;
         }
@@ -775,7 +880,7 @@ void MainWindow::handleDataConnRequest(){
         return;
     }
 
-    qDebug().noquote()<<"Current Status: "<<stringifyServerStatus(serverStatus);
+    qInfo().noquote()<<"Current Status: "<<stringifyServerStatus(serverStatus);
     if(serverStatus==ServerStatus::STOR_START){
         ReadWorker* readWorker=new ReadWorker;
         readWorker->currentFile=&this->currentFile;
@@ -784,20 +889,24 @@ void MainWindow::handleDataConnRequest(){
         QProgressBar* progressBar=qobject_cast<QProgressBar*>(taskList->itemWidget(item,1));
 
         connect(readWorker,&ReadWorker::resultReady,this,[=](QByteArray requestBuf){
-            qDebug()<<"Current Thread: "<<QThread::currentThread()<<endl;
+            qInfo().noquote()<<"Current Thread: "<<QThread::currentThread();
             progressBar->setValue(progressBar->value()+requestBuf.size());
-            qDebug()<<"Read current file: "<<this->currentFile.fileName()<<" "<<requestBuf.size()<<" bytes";
-            qDebug()<<this->dataSocket<<endl;
+            QString logString=QString("Upload current file: %1 %2 bytes").arg(this->currentFile.fileName()).arg(requestBuf.size());
+            qInfo().noquote()<<logString;
+            statusLabel->setText(logString);
+            qInfo().noquote()<<this->dataSocket;
             this->dataSocket->write(requestBuf);
             this->dataSocket->flush();
         });
 
         connect(readWorker,&ReadWorker::finished,this,[=](){
-           qDebug()<<"Read finished"<<endl;
-           this->dataSocket->disconnectFromHost();
+            QString logString=QString("Upload current file %1 successfully").arg(this->currentFile.fileName());
+            qInfo().noquote()<<logString;
+            statusLabel->setText(logString);
+            this->dataSocket->disconnectFromHost();
         });
 
-        qDebug()<<"Start New Thread"<<endl;
+        qInfo().noquote()<<"Start New Thread";
         readWorker->start();
 
         return;
@@ -805,19 +914,22 @@ void MainWindow::handleDataConnRequest(){
 }
 
 void MainWindow::handleDataConnResponse(){
-    qDebug().noquote()<<"Current Status: "<<stringifyServerStatus(serverStatus);
+    qInfo().noquote()<<"Current Status: "<<stringifyServerStatus(serverStatus);
     if(serverStatus==ServerStatus::RETR_START){
         QByteArray responseBuf=dataSocket->readAll();
         currentFile.write(responseBuf);
         QTreeWidgetItem *item=taskList->topLevelItem(taskList->topLevelItemCount()-1);
         QProgressBar* progressBar=qobject_cast<QProgressBar*>(taskList->itemWidget(item,1));
         progressBar->setValue(progressBar->value()+responseBuf.size());
-        qDebug()<<"Write current file: "<<currentFile.fileName()<<" "<<responseBuf.size()<<" bytes";
+        QString logString=QString("Download current file %1 %2 bytes").arg(currentFile.fileName()).arg(responseBuf.size());
+        qInfo().noquote()<<logString;
+        statusLabel->setText(logString);
         return;
     }
     if(resumeServerStatus==ServerStatus::LIST_START){
         QString responseBuf(dataSocket->readAll());
-        qDebug().noquote()<<responseBuf<<endl;
+        qInfo().noquote()<<"";
+        qInfo().noquote()<<responseBuf;
         QString permission;
         QString owner;
         QString group;
@@ -830,6 +942,7 @@ void MainWindow::handleDataConnResponse(){
         QString tmp;
         QTextStream responseBufStream(&responseBuf);
 
+        isRemoteDirectory.clear();
         remoteFileList->clear();
 
         while(!responseBufStream.atEnd()){
@@ -867,10 +980,10 @@ void MainWindow::centerAndResize(){
     QSize availableSize = qApp->primaryScreen()->geometry().size();
     int width = availableSize.width();
     int height = availableSize.height();
-    qDebug().noquote() << "Available dimensions " << width << "x" << height;
+    qInfo().noquote() << "Available dimensions " << width << "x" << height;
     width *= 0.8; // 60% of the screen size
     height *= 0.8; // 60% of the screen size
-    qDebug().noquote() << "Computed dimensions " << width << "x" << height;
+    qInfo().noquote() << "Computed dimensions " << width << "x" << height;
     QSize newSize( width, height );
 
     setGeometry(
@@ -984,5 +1097,57 @@ QString MainWindow::stringifyServerStatus(ServerStatus status){
     if(status==ServerStatus::DELE_END){
         return "DELE_END";
     }
+    if(status==ServerStatus::RNFR_START){
+        return "RNFR_START";
+    }
+    if(status==ServerStatus::RNFR_END){
+        return "RNTO_START";
+    }
+    if(status==ServerStatus::RNTO_START){
+        return "RNTO_START";
+    }
+    if(status==ServerStatus::RNTO_END){
+        return "RNTO_END";
+    }
+    if(status==ServerStatus::COMMAND_DISCONNECT){
+        return "COMMAND_DISCONNECT";
+    }
+    if(status==ServerStatus::QUIT_START){
+        return "QUIT_START";
+    }
+    if(status==ServerStatus::QUIT_END){
+        return "QUIT_END";
+    }
     return "UNKNOWN_STATUS";
+}
+
+void MainWindow::addLogToPanel(QString requestBuf){
+    QString infoLog="<font color='orange'>%1</font>";
+    QString logHtml=infoLog.arg(requestBuf);
+    logPanel->appendHtml(logHtml);
+    logPanel->verticalScrollBar()->setValue(logPanel->verticalScrollBar()->maximum());
+    return;
+}
+
+void MainWindow::addLogToPanel(int responseCode,QString tmpBuf){
+    QString successLog="<font color='green'>%1</font>";
+    QString errorLog="<font color='red'>%1</font>";
+    QString infoLog="<font color='blue'>%1</font>";
+
+    QString logHtml;
+    if(responseCode>=200 && responseCode<300){
+        logHtml=successLog.arg(tmpBuf);
+    }
+    if(responseCode>=400){
+        logHtml=errorLog.arg(tmpBuf);
+    }
+    if(responseCode>=100 && responseCode<200){
+        logHtml=successLog.arg(tmpBuf);
+    }
+    if(responseCode>=300&& responseCode<400){
+        logHtml=infoLog.arg(tmpBuf);
+    }
+
+    logPanel->appendHtml(logHtml);
+    logPanel->verticalScrollBar()->setValue(logPanel->verticalScrollBar()->maximum());
 }
