@@ -135,6 +135,7 @@ public:
     QPushButton *connectButton;
     QPushButton *quitButton;
 
+    QPushButton *changeLocalDirButton;
     QPushButton *returnToParentButton;
 
     QTreeWidget *localFileList;
@@ -169,7 +170,9 @@ public:
     ServerStatus serverStatus=ServerStatus::COMMAND_DISCONNECT;
     ServerStatus resumeServerStatus = ServerStatus::COMMAND_DISCONNECT;
 
-    bool emptyResponse=true;
+    bool isEmptyDataConnResponse=true;
+
+    int cmdResponseStatus=-1;
 
     void centerAndResize();
     void connectToServer();
