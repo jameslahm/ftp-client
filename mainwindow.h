@@ -35,6 +35,7 @@
 #include <QScrollBar>
 #include <QThread>
 #include <QVector>
+#include <QCloseEvent>
 
 #include "readworker.h"
 
@@ -86,7 +87,11 @@ public:
         RNTO_START,
         RNTO_END,
         QUIT_START,
-        QUIT_END
+        QUIT_END,
+        REST_START,
+        REST_END,
+        APPE_START,
+        APPE_END
     };
 
 
@@ -117,14 +122,17 @@ public:
         DELE,
         RNFR,
         RNTO,
-        QUIT
+        QUIT,
+        REST,
+        APPE
     };
 
     QMap<RequestType,QString> RequestTypeMap{{RequestType::USER,"USER"},{RequestType::PASS,"PASS"},{RequestType::TYPE,"TYPE"},{RequestType::SYST,"SYST"}
                                              ,{RequestType::PORT,"PORT"},{RequestType::PASV,"PASV"},{RequestType::LIST,"LIST"},{RequestType::RETR,"RETR"},
                                              {RequestType::PWD,"PWD"},{RequestType::CWD,"CWD"},{RequestType::STOR,"STOR"},
                                              {RequestType::MKD,"MKD"},{RequestType::RMD,"RMD"},{RequestType::DELE,"DELE"},
-                                             {RequestType::RNFR,"RNFR"},{RequestType::RNTO,"RNTO"},{RequestType::QUIT,"QUIT"}
+                                             {RequestType::RNFR,"RNFR"},{RequestType::RNTO,"RNTO"},{RequestType::QUIT,"QUIT"},
+                                             {RequestType::REST,"REST"},{RequestType::APPE,"APPE"}
                                              };
 
     QLineEdit *serverAdressInput;
@@ -159,6 +167,8 @@ public:
 
     QFile currentFile;
     QString currentFileName=nullptr;
+    int currentFileBreakPoint=-1;
+    QProgressBar* currentProgressBar=nullptr;
 
     QHash<QString, bool> isLocalDirectory;
     QHash<QString,bool> isRemoteDirectory;
@@ -195,6 +205,8 @@ public:
     void addLogToPanel(QString requestBuf);
     void addLogToPanel(int responseCode,QString tmpBuf);
     void handleDataConnEmptyResponse();
+    void closeEvent(QCloseEvent* event);
+    void checkBreakPoint(RequestType requestType);
 };
 
 #endif // MAINWINDOW_H

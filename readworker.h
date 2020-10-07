@@ -10,6 +10,7 @@ class ReadWorker:public QThread
     Q_OBJECT
 public: 
     QFile *currentFile;
+    int offset;
 
     ReadWorker();
     void run(){
@@ -18,6 +19,9 @@ public:
             return;
         }
         else{
+            if(offset!=-1){
+                currentFile->seek(offset);
+            }
             while(!currentFile->atEnd()){
                 QByteArray resultBuf=currentFile->read(BUFSIZ*20);
                 emit resultReady(resultBuf);

@@ -186,7 +186,7 @@ void MainWindow::changeLocalDir(QString path){
 
     QString logString=QString("Set local dir %1").arg(localDir.absolutePath());
     qInfo().noquote()<<logString;
-    statusLabel->setText(logString);
+    //    statusLabel->setText(logString);
     localDirPathLabel->setText(localDir.absolutePath());
 
     foreach(QFileInfo fileInfo,localDir.entryInfoList()){
@@ -241,7 +241,7 @@ void MainWindow::changeRemoteDir(QString path){
     remoteDirPath=destPath;
     QString logString=QString("Set remote dir %1").arg(remoteDirPath);
     qInfo().noquote()<<logString;
-    statusLabel->setText(logString);
+    //    statusLabel->setText(logString);
 }
 
 
@@ -468,6 +468,11 @@ void MainWindow::handleCommandResponse(){
             if(dataSocket==nullptr){changeServerStatus(ServerStatus::STOR_END);}
             return;
         }
+        if(serverStatus==ServerStatus::APPE_START){
+            cmdResponseStatus=226;
+            if(dataSocket==nullptr){changeServerStatus(ServerStatus::APPE_END);}
+            return;
+        }
     }
 
     if(responseCode==227){
@@ -554,6 +559,10 @@ void MainWindow::handleCommandResponse(){
             changeServerStatus(ServerStatus::RNFR_END);
             return;
         }
+        if(serverStatus==ServerStatus::REST_START){
+            changeServerStatus(ServerStatus::REST_END);
+            return;
+        }
     }
 
     if(responseCode==421){
@@ -571,6 +580,50 @@ void MainWindow::handleCommandResponse(){
     }
 }
 
+
+void MainWindow::checkBreakPoint(RequestType requestType){
+    qInfo().noquote()<<"Start check break point"<<currentFileName;
+    QString a="123";
+    QString b="123";
+    if(a==b){
+        qInfo().noquote()<<"Test Success"<<endl;
+    }
+    if(requestType==RequestType::RETR){
+        for(int i=0;i<localFileList->topLevelItemCount();i++){
+            QTreeWidgetItem *item=localFileList->topLevelItem(i);
+            qInfo().noquote()<<item->text(0);
+            if(item->text(0)==currentFileName){
+                currentFileBreakPoint=item->text(1).toInt();
+                qInfo().noquote()<<"Current breakpoint"<<currentFileBreakPoint;
+                return;
+            };
+        }
+    }
+    if(requestType==RequestType::STOR){
+        for(int i=0;i<remoteFileList->topLevelItemCount();i++){
+            QTreeWidgetItem *item=remoteFileList->topLevelItem(i);
+            if(item->text(0)==currentFileName){
+                currentFileBreakPoint=item->text(1).toInt();
+                qInfo().noquote()<<"Current breakpoint"<<currentFileBreakPoint;
+                return;
+            };
+        }
+    }
+    qInfo().noquote()<<"No break point";
+}
+
+
+void MainWindow::closeEvent( QCloseEvent * event )
+{
+    int res=QMessageBox::information( this, tr("Exit Tip"), tr("Do you really want to exit?"), QMessageBox::Yes | QMessageBox::No,QMessageBox::No);
+    if(res==QMessageBox::Yes){
+        event->accept();
+    }
+    else{
+        event->ignore();
+    }
+
+}
 
 void MainWindow::changeServerStatus(ServerStatus status){
     qInfo().noquote()<<"Change serverStatus from "<<stringifyServerStatus(serverStatus)<<" to"<<stringifyServerStatus(status)<<endl;
@@ -640,7 +693,7 @@ void MainWindow::changeServerStatus(ServerStatus status){
         int port=dataServer->serverPort();
         ipAddress=commandSocket->localAddress().toString();
         sendCommandRequest(RequestType::PORT,QString("%1,%2,%3\r\n").arg(ipAddress).arg(port/256).arg(port%256).replace(".",","));
-        statusLabel->setText(tr("The server is running on IP: %1 port: %2\n")
+        statusLabel->setText(tr("The server is running on IP: %1 port: %2")
                              .arg(ipAddress).arg(dataServer->serverPort()));
         return;
     }
@@ -694,6 +747,15 @@ void MainWindow::changeServerStatus(ServerStatus status){
         changeServerStatus(ServerStatus::IDLE);
         return;
     }
+    if(status==ServerStatus::REST_START){
+        sendCommandRequest(RequestType::REST,QString("%1\r\n").arg(currentFileBreakPoint));
+        return;
+    }
+    if(status==ServerStatus::REST_END){
+        currentProgressBar->setValue(currentProgressBar->value()+currentFileBreakPoint);
+        changeServerStatus(ServerStatus::RETR_START);
+        return;
+    }
     if(status==ServerStatus::RETR_START){
         if(dataConnStatus==DataConnStatus::DISCONNECT){
             resumeServerStatus=ServerStatus::RETR_START;
@@ -701,8 +763,28 @@ void MainWindow::changeServerStatus(ServerStatus status){
             return;
         }
         else{
+            if(currentFileBreakPoint==-1){
+                checkBreakPoint(RequestType::RETR);
+                if(currentFileBreakPoint!=-1){
+                    int res=QMessageBox::information(this,tr("Resume Transmission"),tr("Do you want to resume transmission?"),
+                                                     QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
+                    if(res==QMessageBox::Yes){
+                        changeServerStatus(ServerStatus::REST_START);
+                        return;
+                    }
+                    else{
+                        currentFileBreakPoint=-1;
+                    }
+                }
+            }
             currentFile.setFileName(currentFileName);
-            if(!currentFile.open(QIODevice::WriteOnly)){
+            QIODevice::OpenMode mode;
+            if(currentFileBreakPoint==-1){
+                mode=QIODevice::WriteOnly;
+            }else{
+                mode=QIODevice::WriteOnly|QIODevice::Append;
+            }
+            if(!currentFile.open(mode)){
 
                 qCritical().noquote()<<"Can't open file";
             }
@@ -714,6 +796,31 @@ void MainWindow::changeServerStatus(ServerStatus status){
         changeServerStatus(ServerStatus::IDLE);
         return;
     }
+    if(status==ServerStatus::APPE_START){
+        if(dataConnStatus==DataConnStatus::DISCONNECT){
+            resumeServerStatus=ServerStatus::APPE_START;
+            initDataConn();
+            return;
+        }
+        else{
+            currentProgressBar->setValue(currentProgressBar->value()+currentFileBreakPoint);
+            currentFile.setFileName(currentFileName);
+            if(!currentFile.open(QIODevice::ReadOnly)){
+
+                qCritical().noquote()<<"Can't open file";
+            }
+
+            sendCommandRequest(RequestType::APPE,currentFileName+"\r\n");
+
+            handleDataConnRequest();
+
+            return;
+        }
+    }
+    if(status==ServerStatus::APPE_END){
+        changeServerStatus(ServerStatus::LIST_START);
+        return;
+    }
     if(status==ServerStatus::STOR_START){
         if(dataConnStatus==DataConnStatus::DISCONNECT){
             resumeServerStatus=ServerStatus::STOR_START;
@@ -721,6 +828,21 @@ void MainWindow::changeServerStatus(ServerStatus status){
             return;
         }
         else{
+            if(currentFileBreakPoint==-1){
+                checkBreakPoint(RequestType::STOR);
+                if(currentFileBreakPoint!=-1){
+                    int res=QMessageBox::information(this,tr("Resume Transmission"),tr("Do you want to resume transmission?"),
+                                                     QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
+                    if(res==QMessageBox::Yes){
+                        changeServerStatus(ServerStatus::APPE_START);
+                        return;
+                    }
+                    else{
+                        currentFileBreakPoint=-1;
+                    }
+                }
+            }
+
             currentFile.setFileName(currentFileName);
             if(!currentFile.open(QIODevice::ReadOnly)){
 
@@ -810,6 +932,7 @@ void MainWindow::addTask(QString taskName, int maximum){
     progressBar->setValue(1);
     progressBar->setMaximumWidth(200);
     progressBar->setAlignment(Qt::AlignVCenter | Qt::AlignCenter);
+    currentProgressBar=progressBar;
     taskList->setItemWidget(item,1,progressBar);
 }
 
@@ -859,7 +982,7 @@ void MainWindow::handlePortDataConn(){
     connect(dataSocket, &QAbstractSocket::disconnected,this,&MainWindow::handleDataConnDisconnect);
     connect(dataSocket,&QTcpSocket::readyRead,this,&MainWindow::handleDataConnResponse);
 
-    if(serverStatus==ServerStatus::STOR_START){
+    if(serverStatus==ServerStatus::STOR_START || serverStatus==ServerStatus::APPE_START){
         handleDataConnRequest();
     }
 }
@@ -867,7 +990,7 @@ void MainWindow::handlePortDataConn(){
 void MainWindow::handleDataConnDisconnect(){
     QString logString="Data Conn disconnect";
     qInfo().noquote()<<logString;
-    statusLabel->setText(logString);
+    //    statusLabel->setText(logString);
 
     qInfo().noquote()<<"Empty response: "<<isEmptyDataConnResponse;
     if(isEmptyDataConnResponse){
@@ -894,6 +1017,8 @@ void MainWindow::handleDataConnDisconnect(){
     if(serverStatus==ServerStatus::RETR_START){
         qInfo().noquote()<<"Close current file: "<<currentFile.fileName();
         currentFile.close();
+        //        statusLabel->setText(logString);
+        currentFileBreakPoint=-1;
         if(cmdResponseStatus==226){
             changeLocalDir(".");
             changeServerStatus(ServerStatus::RETR_END);
@@ -903,7 +1028,15 @@ void MainWindow::handleDataConnDisconnect(){
     if(serverStatus==ServerStatus::STOR_START){
         qInfo().noquote()<<"Close current file: "<<currentFile.fileName();
         currentFile.close();
+        currentFileBreakPoint=-1;
         if(cmdResponseStatus==226)changeServerStatus(ServerStatus::STOR_END);
+        return ;
+    }
+    if(serverStatus==ServerStatus::APPE_START){
+        qInfo().noquote()<<"Close current file: "<<currentFile.fileName();
+        currentFile.close();
+        currentFileBreakPoint=-1;
+        if(cmdResponseStatus==226)changeServerStatus(ServerStatus::APPE_END);
         return ;
     }
 }
@@ -922,19 +1055,17 @@ void MainWindow::handleDataConnRequest(){
 
     qInfo().noquote()<<"Current Status: "<<stringifyServerStatus(serverStatus);
     isEmptyDataConnResponse=false;
-    if(serverStatus==ServerStatus::STOR_START){
+    if(serverStatus==ServerStatus::STOR_START || serverStatus==ServerStatus::APPE_START){
         ReadWorker* readWorker=new ReadWorker;
         readWorker->currentFile=&this->currentFile;
-
-        QTreeWidgetItem *item=taskList->topLevelItem(taskList->topLevelItemCount()-1);
-        QProgressBar* progressBar=qobject_cast<QProgressBar*>(taskList->itemWidget(item,1));
+        readWorker->offset=currentFileBreakPoint;
 
         connect(readWorker,&ReadWorker::resultReady,this,[=](QByteArray requestBuf){
             qInfo().noquote()<<"Current Thread: "<<QThread::currentThread();
-            progressBar->setValue(progressBar->value()+requestBuf.size());
+            currentProgressBar->setValue(currentProgressBar->value()+requestBuf.size());
             QString logString=QString("Upload current file: %1 %2 bytes").arg(this->currentFile.fileName()).arg(requestBuf.size());
             qInfo().noquote()<<logString;
-            statusLabel->setText(logString);
+            //            statusLabel->setText(logString);
             qInfo().noquote()<<this->dataSocket;
             this->dataSocket->write(requestBuf);
             this->dataSocket->flush();
@@ -943,8 +1074,8 @@ void MainWindow::handleDataConnRequest(){
         connect(readWorker,&ReadWorker::finished,this,[=](){
             QString logString=QString("Upload current file %1 successfully").arg(this->currentFile.fileName());
             qInfo().noquote()<<logString;
-            progressBar->setValue(progressBar->value());
-            statusLabel->setText(logString);
+            currentProgressBar->setValue(currentProgressBar->value());
+            //            statusLabel->setText(logString);
             this->dataSocket->disconnectFromHost();
         });
 
@@ -957,7 +1088,7 @@ void MainWindow::handleDataConnRequest(){
 
 void MainWindow::handleDataConnEmptyResponse(){
     qInfo().noquote()<<"Current Status: "<<stringifyServerStatus(serverStatus);
-    if(resumeServerStatus==ServerStatus::LIST_START){
+    if(serverStatus==ServerStatus::LIST_START){
         isRemoteDirectory.clear();
         remoteFileList->clear();
     }
@@ -969,12 +1100,10 @@ void MainWindow::handleDataConnResponse(){
     if(serverStatus==ServerStatus::RETR_START){
         QByteArray responseBuf=dataSocket->readAll();
         currentFile.write(responseBuf);
-        QTreeWidgetItem *item=taskList->topLevelItem(taskList->topLevelItemCount()-1);
-        QProgressBar* progressBar=qobject_cast<QProgressBar*>(taskList->itemWidget(item,1));
-        progressBar->setValue(progressBar->value()+responseBuf.size());
+        currentProgressBar->setValue(currentProgressBar->value()+responseBuf.size());
         QString logString=QString("Download current file %1 %2 bytes").arg(currentFile.fileName()).arg(responseBuf.size());
         qInfo().noquote()<<logString;
-        statusLabel->setText(logString);
+        //        statusLabel->setText(logString);
         return;
     }
     if(serverStatus==ServerStatus::LIST_START){
@@ -1175,6 +1304,18 @@ QString MainWindow::stringifyServerStatus(ServerStatus status){
     }
     if(status==ServerStatus::QUIT_END){
         return "QUIT_END";
+    }
+    if(status==ServerStatus::REST_START){
+        return "REST_START";
+    }
+    if(status==ServerStatus::REST_END){
+        return "REST_END";
+    }
+    if(status==ServerStatus::APPE_START){
+        return "APPE_START";
+    }
+    if(status==ServerStatus::APPE_END){
+        return "APPE_END";
     }
     return "UNKNOWN_STATUS";
 }
