@@ -190,7 +190,7 @@ public:
     void handleDataConnResponse();
     void handleDataConnRequest();
     void sendCommandRequest(RequestType requestType,QString args);
-    void handleCommandError(QAbstractSocket::SocketError socketError);
+    void handleSocketError(QAbstractSocket::SocketError socketError,QTcpSocket* socket);
     void changeDataConnMode(DataConnMode mode);
     void changeServerStatus(ServerStatus status);
     void initDataConn();
@@ -207,6 +207,7 @@ public:
     void handleDataConnEmptyResponse();
     void closeEvent(QCloseEvent* event);
     void checkBreakPoint(RequestType requestType);
+    void clearDataConn();
 };
 
 #endif // MAINWINDOW_H

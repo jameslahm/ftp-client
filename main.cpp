@@ -10,5 +10,7 @@ int main(int argc, char *argv[])
     w.show();
     w.centerAndResize();
 
+    w.setWindowIcon(QIcon(":/images/ftp.png"));
+
     return a.exec();
 }

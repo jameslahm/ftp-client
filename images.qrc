@@ -7,5 +7,8 @@
         <file>images/dir.png</file>
         <file>images/file.png</file>
         <file>images/new_dir.png</file>
+        <file>images/ftp.png</file>
+        <file>images/open_dir.png</file>
+        <file>images/return.png</file>
     </qresource>
 </RCC>
