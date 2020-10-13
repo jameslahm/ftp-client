@@ -889,6 +889,7 @@ void MainWindow::changeServerStatus(ServerStatus status){
         }
     }
     if(status==ServerStatus::RETR_END){
+        changeLocalDir(".");
         changeServerStatus(ServerStatus::IDLE);
         return;
     }
@@ -1125,7 +1126,6 @@ void MainWindow::handleDataConnDisconnect(){
         //        statusLabel->setText(logString);
         currentFileBreakPoint=-1;
         if(cmdResponseStatus==226){
-            changeLocalDir(".");
             changeServerStatus(ServerStatus::RETR_END);
         }
         return ;
