@@ -146,7 +146,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(connectButton,&QPushButton::clicked,[=](){this->changeServerStatus(ServerStatus::COMMAND_CONNECT_START);});
     connect(quitButton,&QPushButton::clicked,[=](){
-        this->changeServerStatus(ServerStatus::QUIT_START);
+        if(serverStatus!=ServerStatus::COMMAND_DISCONNECT){
+            this->changeServerStatus(ServerStatus::QUIT_START);
+        }
     });
 
     connect(localFileList,&QTreeWidget::itemDoubleClicked,[=](QTreeWidgetItem* item,int){if(item){
@@ -173,7 +175,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     returnToParentButton->setEnabled(false);
-//    changeLocalDirButton->setEnabled(false);
+    //    changeLocalDirButton->setEnabled(false);
 
     changeLocalDir(QDir::currentPath());
 }
@@ -711,11 +713,11 @@ void MainWindow::changeServerStatus(ServerStatus status){
     qInfo().noquote()<<"Change serverStatus from "<<stringifyServerStatus(serverStatus)<<" to"<<stringifyServerStatus(status)<<endl;
     serverStatus=status;
     returnToParentButton->setEnabled(false);
-//    changeLocalDirButton->setEnabled(false);
+    //    changeLocalDirButton->setEnabled(false);
 
     if(status==ServerStatus::IDLE){
         returnToParentButton->setEnabled(true);
-//        changeLocalDirButton->setEnabled(true);
+        //        changeLocalDirButton->setEnabled(true);
         return;
     }
     if(status==ServerStatus::COMMAND_DISCONNECT){
@@ -1099,6 +1101,7 @@ void MainWindow::clearDataConn(){
         dataServer->deleteLater();
         dataServer=nullptr;
     }
+    dataConnStatus=DataConnStatus::DISCONNECT;
 }
 
 void MainWindow::handleDataConnDisconnect(){
@@ -1220,7 +1223,6 @@ void MainWindow::handleDataConnResponse(){
         QString group;
         QString size;
         QString name;
-        QString time;
         QString tmp;
         QTextStream responseBufStream(&responseBuf);
 
@@ -1228,22 +1230,33 @@ void MainWindow::handleDataConnResponse(){
         remoteFileList->clear();
 
         while(!responseBufStream.atEnd()){
+            QString time;
             QString lineBuf=responseBufStream.readLine();
             QTextStream lineBufStream(&lineBuf);
 
             lineBufStream>>permission>>tmp>>owner>>group>>size;
 
-            while(!lineBufStream.atEnd()){
+            //            while(!lineBufStream.atEnd()){
+            //                QString tmpBuf;
+            //                lineBufStream>>tmpBuf;
+            //                if(lineBufStream.atEnd()){
+            //                    name=tmpBuf;
+            //                }
+            //                else{
+            //                    time+=" ";
+            //                    time+=tmpBuf;
+            //                }
+            //            }
+            for(int i=0;i<3;i++){
                 QString tmpBuf;
                 lineBufStream>>tmpBuf;
-                if(lineBufStream.atEnd()){
-                    name=tmpBuf;
-                }
-                else{
-                    time+=" ";
-                    time+=tmpBuf;
-                }
+                time+=tmpBuf;
+                time+=" ";
             }
+
+            lineBufStream>>name;
+            name+=lineBufStream.readAll();
+            qInfo().noquote()<<name;
 
             QTreeWidgetItem *item=new QTreeWidgetItem;
             item->setText(0,name);
