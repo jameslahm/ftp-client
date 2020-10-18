@@ -270,6 +270,9 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                         this->changeServerStatus(ServerStatus::RMD_START);
                         this->sendCommandRequest(RequestType::RMD,item->text(0)+"\r\n");
                     }});
+                if(serverStatus!=ServerStatus::IDLE){
+                    rmdAction->setEnabled(false);
+                }
                 menu.addAction(rmdAction);
             }
 
@@ -287,7 +290,9 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                         this->changeServerStatus(ServerStatus::DELE_START);
                         this->sendCommandRequest(RequestType::DELE,item->text(0)+"\r\n");
                     }});
-
+                if(serverStatus!=ServerStatus::IDLE){
+                    rmfAction->setEnabled(false);
+                }
                 menu.addAction(rmfAction);
 
                 QAction *downloadAction=new QAction(tr("Download"));
@@ -297,6 +302,9 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                     this->addTask(this->currentFileName,item->text(1).toInt());
                     this->changeServerStatus(ServerStatus::RETR_START);
                 });
+                if(serverStatus!=ServerStatus::IDLE){
+                    downloadAction->setEnabled(false);
+                }
                 menu.addAction(downloadAction);
             }
 
@@ -306,6 +314,9 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                 this->changeServerStatus(ServerStatus::RNFR_START);
                 this->sendCommandRequest(RequestType::RNFR,item->text(0)+"\r\n");
             });
+            if(serverStatus!=ServerStatus::IDLE){
+                rnAction->setEnabled(false);
+            }
             menu.addAction(rnAction);
 
             menu.exec(remoteFileList->mapToGlobal(pos));
@@ -329,7 +340,7 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                     this->sendCommandRequest(RequestType::MKD,text+"\r\n");
                 }
             });
-            if(serverStatus==ServerStatus::COMMAND_DISCONNECT){
+            if(serverStatus!=ServerStatus::IDLE){
                 mkdAction->setEnabled(false);
             }
             menu.addAction(mkdAction);
@@ -353,6 +364,9 @@ void MainWindow::handleContextMenu(QPoint pos,QString fileListType){
                     this->changeServerStatus(ServerStatus::STOR_START);
                 });
                 if(serverStatus==ServerStatus::COMMAND_DISCONNECT){
+                    uploadAction->setEnabled(false);
+                }
+                if(serverStatus!=ServerStatus::IDLE){
                     uploadAction->setEnabled(false);
                 }
                 menu.addAction(uploadAction);
