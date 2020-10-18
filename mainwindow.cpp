@@ -605,6 +605,13 @@ void MainWindow::handleCommandResponse(){
         }
     }
 
+    if(responseCode==425){
+        if(serverStatus==ServerStatus::LIST_START || serverStatus==ServerStatus::RETR_START || serverStatus==ServerStatus::STOR_START || serverStatus==ServerStatus::APPE_START){
+            QMessageBox::critical(this,tr("Error"),tr("Connection can't be established, Please check your network and retry"),QMessageBox::Ok,QMessageBox::Ok);
+            changeServerStatus(ServerStatus::QUIT_END);
+        }
+    }
+
     if(responseCode==530){
         if(serverStatus==ServerStatus::USER_START){
             QMessageBox::critical(this,tr("Error"),tr("Username not acceptable"),QMessageBox::Ok,QMessageBox::Ok);
