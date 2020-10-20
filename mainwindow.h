@@ -183,6 +183,7 @@ public:
     bool isEmptyDataConnResponse=true;
 
     int cmdResponseStatus=-1;
+    QString tmpResponseBuf;
 
     void centerAndResize();
     void connectToServer();

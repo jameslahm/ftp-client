@@ -1141,6 +1141,61 @@ void MainWindow::handleDataConnDisconnect(){
     dataConnStatus=DataConnStatus::DISCONNECT;
 
     if(serverStatus==ServerStatus::LIST_START){
+        qInfo().noquote()<<tmpResponseBuf;
+        QString permission;
+        QString owner;
+        QString group;
+        QString size;
+        QString name;
+        QString tmp;
+        QTextStream responseBufStream(&tmpResponseBuf);
+
+        isRemoteDirectory.clear();
+        remoteFileList->clear();
+
+        while(!responseBufStream.atEnd()){
+            QString time;
+            QString lineBuf=responseBufStream.readLine();
+            QTextStream lineBufStream(&lineBuf);
+
+            lineBufStream>>permission>>tmp>>owner>>group>>size;
+
+            //            while(!lineBufStream.atEnd()){
+            //                QString tmpBuf;
+            //                lineBufStream>>tmpBuf;
+            //                if(lineBufStream.atEnd()){
+            //                    name=tmpBuf;
+            //                }
+            //                else{
+            //                    time+=" ";
+            //                    time+=tmpBuf;
+            //                }
+            //            }
+            for(int i=0;i<3;i++){
+                QString tmpBuf;
+                lineBufStream>>tmpBuf;
+                time+=tmpBuf;
+                time+=" ";
+            }
+
+            lineBufStream>>name;
+            name+=lineBufStream.readAll();
+//            qInfo().noquote()<<name;
+
+            QTreeWidgetItem *item=new QTreeWidgetItem;
+            item->setText(0,name);
+            item->setText(1,size);
+            item->setText(2,owner);
+            item->setText(3,group);
+            item->setText(4,time);
+            isRemoteDirectory[name]=(permission[0]=='d');
+
+            QPixmap pixmap(isRemoteDirectory[name]? ":/images/dir.png":":/images/file.png");
+            item->setIcon(0,pixmap);
+
+            remoteFileList->addTopLevelItem(item);
+        }
+        tmpResponseBuf.clear();
         if(cmdResponseStatus==226)changeServerStatus(ServerStatus::LIST_END);
         return;
     }
@@ -1237,61 +1292,9 @@ void MainWindow::handleDataConnResponse(){
     }
     if(serverStatus==ServerStatus::LIST_START){
         QString responseBuf(dataSocket->readAll());
-        qInfo().noquote()<<"";
-        qInfo().noquote()<<responseBuf;
-        QString permission;
-        QString owner;
-        QString group;
-        QString size;
-        QString name;
-        QString tmp;
-        QTextStream responseBufStream(&responseBuf);
-
-        isRemoteDirectory.clear();
-        remoteFileList->clear();
-
-        while(!responseBufStream.atEnd()){
-            QString time;
-            QString lineBuf=responseBufStream.readLine();
-            QTextStream lineBufStream(&lineBuf);
-
-            lineBufStream>>permission>>tmp>>owner>>group>>size;
-
-            //            while(!lineBufStream.atEnd()){
-            //                QString tmpBuf;
-            //                lineBufStream>>tmpBuf;
-            //                if(lineBufStream.atEnd()){
-            //                    name=tmpBuf;
-            //                }
-            //                else{
-            //                    time+=" ";
-            //                    time+=tmpBuf;
-            //                }
-            //            }
-            for(int i=0;i<3;i++){
-                QString tmpBuf;
-                lineBufStream>>tmpBuf;
-                time+=tmpBuf;
-                time+=" ";
-            }
-
-            lineBufStream>>name;
-            name+=lineBufStream.readAll();
-            qInfo().noquote()<<name;
-
-            QTreeWidgetItem *item=new QTreeWidgetItem;
-            item->setText(0,name);
-            item->setText(1,size);
-            item->setText(2,owner);
-            item->setText(3,group);
-            item->setText(4,time);
-            isRemoteDirectory[name]=(permission[0]=='d');
-
-            QPixmap pixmap(isRemoteDirectory[name]? ":/images/dir.png":":/images/file.png");
-            item->setIcon(0,pixmap);
-
-            remoteFileList->addTopLevelItem(item);
-        }
+//        qInfo().noquote()<<"";
+//        qInfo().noquote()<<responseBuf;
+        tmpResponseBuf+=responseBuf;
         return;
     }
 }
